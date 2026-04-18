@@ -85,7 +85,11 @@ async def inference_node(state: OrchestratorState) -> OrchestratorState:
         "difficulty": state.get("difficulty", "intermediate"),
         "mood": state.get("mood", "neutral"),
         "keywords": state.get("keywords", []),
+        # NEW: needed so infer_parameters can build user_info/chat_history
+        "conversation_history": state.get("conversation_history", []) or [],
+        "student_id": state.get("student_id", ""),
     }
+
 
     # Step 1: deterministic personalization plan — this OWNS difficulty,
     # depth, count, note_style per task spec, so it must run FIRST so the
