@@ -1,12 +1,19 @@
-"""Agent 1: Context Analyzer — NLP Intent Parser.
-Analyzes student message, extracts intent, subject, difficulty, mood.
+"""Agent 1: Context Analyzer — Hybrid NLP Intent Parser.
+
+Two-tier classifier:
+  1. FAST PATH: deterministic rule-based scoring (sub-ms, $0).
+  2. SLOW PATH: LLM fallback triggered ONLY when rule confidence is low.
+
+This gives LLM-level accuracy on ambiguous/novel phrasing without paying
+the latency + cost tax on every single turn.
 """
 import re
 from typing import Any, Dict, List
 from app.graph.state import OrchestratorState
+from app.agents.llm_client import get_llm_client
 
 
-# Rule-based intent patterns (used before/alongside LLM)
+# ── Rule-based lexicons ───────────────────────────────────────────────────────
 DIFFICULTY_SIGNALS = {
     "beginner": ["struggling", "don't understand", "confused", "help", "basic", "beginner", "simple", "easy", "new to", "start"],
     "intermediate": ["practice", "review", "improve", "better at", "intermediate", "working on"],
@@ -48,7 +55,16 @@ MOOD_SIGNALS = {
     "motivated": ["practice", "improve", "better", "learn more", "ready"],
 }
 
+VALID_INTENTS = list(INTENT_PATTERNS.keys())
+VALID_SUBJECTS = list(SUBJECT_PATTERNS.keys()) + ["general"]
+VALID_DIFFICULTIES = list(DIFFICULTY_SIGNALS.keys())
+VALID_MOODS = list(MOOD_SIGNALS.keys()) + ["neutral"]
 
+# Rule confidence threshold — below this, call LLM fallback
+LLM_FALLBACK_THRESHOLD = 0.5
+
+
+# ── Rule-based detectors ──────────────────────────────────────────────────────
 def detect_difficulty(text: str) -> str:
     text_lower = text.lower()
     scores = {level: 0 for level in DIFFICULTY_SIGNALS}
@@ -93,13 +109,10 @@ def detect_mood(text: str) -> str:
 def extract_keywords(text: str) -> List[str]:
     """Keyword extraction, preserving first-appearance order.
 
-    Two tweaks matter downstream:
-    1. We preserve the order in which keywords first appear in the text.
-       The old `list(set(...))` call was O(1) faster but destroyed ordering,
-       which meant the topic-fallback in reasoning_engine picked whichever
-       word landed first in the set's hash order — usually wrong.
-    2. After ordering, we stable-sort so that longer words come first
-       among keywords of equal position. Longer words are more specific
+    1. Preserve first-appearance order — set() destroys ordering, which
+       meant downstream topic-fallback picked whichever word landed
+       first in the set's hash order (usually wrong).
+    2. Stable-sort so longer words come first — longer = more specific
        topic candidates (e.g. "photosynthesis" over "biology").
     """
     stopwords = {"i", "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -109,7 +122,6 @@ def extract_keywords(text: str) -> List[str]:
                  "that", "these", "those", "need", "want", "help", "get", "got", "give",
                  "show", "tell", "make", "please"}
     words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
-    # Preserve first-appearance order
     seen = set()
     ordered: List[str] = []
     for w in words:
@@ -117,40 +129,122 @@ def extract_keywords(text: str) -> List[str]:
             continue
         seen.add(w)
         ordered.append(w)
-    # Stable sort: longer keywords first (more specific)
     ordered.sort(key=len, reverse=True)
     return ordered[:10]
 
 
-async def context_analyzer_node(state: OrchestratorState) -> OrchestratorState:
+# ── Hybrid helpers ────────────────────────────────────────────────────────────
+def _compute_rule_confidence(intent: str, subject: str, mood: str) -> float:
+    """Rule confidence = how many dimensions returned a non-default value.
+
+    Defaults indicate the keyword dictionaries didn't match anything —
+    meaning the message has novel phrasing we should escalate to the LLM.
     """
-    Agent 1: NLP Intent Parser.
+    score = 0.0
+    if intent != "learn_concept":
+        score += 0.34
+    if subject != "general":
+        score += 0.33
+    if mood != "neutral":
+        score += 0.33
+    return score
+
+
+async def _llm_refine_context(message: str, context_text: str) -> Dict[str, Any]:
+    """LLM fallback — structured JSON extraction for ambiguous messages."""
+    llm = get_llm_client()
+    prompt = f"""You are a context analyzer for an educational tutoring system.
+Analyze the student message and return ONLY valid JSON with these exact keys:
+
+{{
+  "intent": "one of: {', '.join(VALID_INTENTS)}",
+  "subject": "subject domain in lowercase (e.g. mathematics, physics, chemistry, biology, history, literature, computer_science, economics, geography, language, or 'general')",
+  "difficulty": "one of: {', '.join(VALID_DIFFICULTIES)}",
+  "mood": "one of: {', '.join(VALID_MOODS)}"
+}}
+
+Student message: "{message}"
+Recent conversation context: "{context_text[:300]}"
+
+Return ONLY the JSON object, no markdown, no explanation.
+"""
+    try:
+        result = await llm.extract_json(prompt)
+        return result if isinstance(result, dict) else {}
+    except Exception as e:
+        print(f"[context_analyzer] LLM fallback failed: {e}")
+        return {}
+
+
+def _safe_enum(value: Any, allowed: List[str], fallback: str) -> str:
+    """Coerce LLM output to a valid enum value."""
+    if isinstance(value, str) and value.strip().lower() in allowed:
+        return value.strip().lower()
+    return fallback
+
+
+# ── Main node ─────────────────────────────────────────────────────────────────
+async def context_analyzer_node(state: OrchestratorState) -> OrchestratorState:
+    """Agent 1: Hybrid NLP Intent Parser.
+
     Extracts: intent, subject, difficulty, mood, keywords from raw_message.
+    Uses rule-based scoring as the fast path and an LLM fallback only when
+    rules return low-confidence (mostly-default) output.
     """
     message = state["raw_message"]
     history = state.get("conversation_history", [])
     profile = state.get("student_profile", {})
 
-    # Combine with recent history for better context
+    # Combine with recent history for better subject detection
     context_text = message
     if history:
         recent = " ".join(h.get("content", "") for h in history[-3:])
         context_text = f"{recent} {message}"
 
-    # Rule-based fast analysis
+    # ── FAST PATH: rule-based ────────────────────────────────────────────────
     intent = detect_intent(message)
     subject = detect_subject(context_text)
     difficulty = detect_difficulty(message)
     mood = detect_mood(message)
     keywords = extract_keywords(message)
 
-    # Override with student profile if set
-    if profile.get("learning_level"):
-        level_map = {"beginner": "beginner", "intermediate": "intermediate", "advanced": "advanced"}
-        profile_difficulty = level_map.get(profile["learning_level"], difficulty)
-        # Only override if message doesn't give explicit signal
-        if detect_difficulty(message) == "intermediate":  # default = no signal
-            difficulty = profile_difficulty
+    rule_confidence = _compute_rule_confidence(intent, subject, mood)
+    used_llm = False
+
+    # ── SLOW PATH: LLM fallback for ambiguous messages ───────────────────────
+    if rule_confidence < LLM_FALLBACK_THRESHOLD:
+        llm_result = await _llm_refine_context(message, context_text)
+        if llm_result:
+            used_llm = True
+            # Only override fields where rules returned their fallback defaults —
+            # clear rule-based signals always win.
+            if intent == "learn_concept" and "intent" in llm_result:
+                intent = _safe_enum(llm_result["intent"], VALID_INTENTS, intent)
+            if subject == "general" and "subject" in llm_result:
+                subject = _safe_enum(llm_result["subject"], VALID_SUBJECTS, subject)
+            if mood == "neutral" and "mood" in llm_result:
+                mood = _safe_enum(llm_result["mood"], VALID_MOODS, mood)
+            if difficulty == "intermediate" and "difficulty" in llm_result:
+                difficulty = _safe_enum(llm_result["difficulty"], VALID_DIFFICULTIES, difficulty)
+
+    # ── Profile overrides: Respect persistent DB profile for neutral signals ──
+    if profile:
+        # 1. learning_level -> difficulty
+        if profile.get("learning_level"):
+            level_map = {"beginner": "beginner", "intermediate": "intermediate", "advanced": "advanced", "expert": "advanced"}
+            profile_difficulty = level_map.get(profile["learning_level"], difficulty)
+            if detect_difficulty(message) == "intermediate":  # default = no signal
+                difficulty = profile_difficulty
+        
+        # 2. emotional_state -> mood
+        if profile.get("emotional_state") and detect_mood(message) == "neutral":
+            mood = profile["emotional_state"]
+        
+        # 3. teaching_style (can be used for specific prompt hints)
+        # Note: tool_selector already reads this directly from state["student_profile"]
+
+    step_tag = f"✓ Agent 1 (Context Analyzer): intent={intent}, subject={subject}, difficulty={difficulty}, mood={mood}"
+    step_tag += f" [rule_conf={rule_confidence:.2f}{', llm=ON' if used_llm else ''}]"
 
     return {
         **state,
@@ -159,5 +253,5 @@ async def context_analyzer_node(state: OrchestratorState) -> OrchestratorState:
         "difficulty": difficulty,
         "mood": mood,
         "keywords": keywords,
-        "workflow_steps": [f"✓ Agent 1 (Context Analyzer): intent={intent}, subject={subject}, difficulty={difficulty}, mood={mood}"],
+        "workflow_steps": [step_tag],
     }
