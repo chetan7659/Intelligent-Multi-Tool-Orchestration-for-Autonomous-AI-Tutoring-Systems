@@ -1,0 +1,37 @@
+# ── Core ───────────────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+python-dotenv
+
+# ── LangGraph + LangChain ──────────────────────────────────────────────────────
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-huggingface
+
+# ── HuggingFace ────────────────────────────────────────────────────────────────
+huggingface-hub
+tokenizers
+
+# ── Database ───────────────────────────────────────────────────────────────────
+sqlalchemy
+asyncpg
+alembic
+
+# ── HTTP ───────────────────────────────────────────────────────────────────────
+httpx
+
+# ── Auth (Supabase JWT verification) ──────────────────────────────────────────
+PyJWT
+cryptography
+
+# ── Evaluation Notebook ───────────────────────────────────────────────────────
+pandas
+matplotlib
+numpy
+jupyter
+ipykernel
