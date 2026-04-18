@@ -8,11 +8,17 @@ EduOrchestrator is a robust, schema-aware AI orchestration system designed to ac
 
 ## 🎯 Problem Statement
 
-Naive LLM implementations (e.g., standard RAG pipelines or basic chat wrappers) suffer from severe limitations in educational contexts:
-- **Hallucinations in Structured Tasks:** They struggle to output reliable, typed parameters for programmatic tools.
-- **Context Blindness:** They treat an anxious beginner the exact same way they treat a confident expert.
-- **Execution Failures:** They lack introspective mechanisms to detect when a generated output violates strict schema constraints, leading to application crashes.
-- **Lack of Verification:** They assume the answer provided is always correct without an observational verification step.
+Build an intelligent middleware orchestrator that can autonomously connect a conversational AI tutor to multiple educational tools by extracting required parameters from chat context and managing complex tool interactions without manual configuration.
+
+The system acts as the **"brain"** that sits between a student’s conversation with an AI tutor and the actual educational tools (quiz generators, note makers, concept explainers, etc.). The core challenge is to create a system that can:
+- **Understand conversational context** and determine what educational tools are needed.
+- **Intelligently extract parameters** required by various tools from natural conversation.
+- **Validate and format requests** to ensure proper tool execution.
+- **Handle diverse tool schemas** across multiple educational functionalities.
+- **Maintain conversation state** and student personalization context.
+
+> [!IMPORTANT]
+> This project focuses purely on the **intelligent orchestration layer** that makes autonomous tool selection and execution possible. It is not building the tutor interface or the educational tools themselves.
 
 ## 💡 Solution Overview
 
