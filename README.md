@@ -125,18 +125,17 @@ The repository includes a dedicated rigorous evaluation suite (`parameter_extrac
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/eduorchestrator.git
-cd eduorchestrator
+git clone https://github.com/chetan7659/Intelligent-Multi-Tool-Orchestration-for-Autonomous-AI-Tutoring-Systems.git
 
 # 2. Backend Setup
 cd backend
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+On Windows: venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
 # 3. Environment Variables
 cp .env.example .env
-# Fill in OPENAI_API_KEY, DATABASE_URL, SUPABASE_URL, etc.
+# Fill   SUPABASE_URL
 
 # 4. Apply Database Schema
 # Execute `supabase_schema.sql` in your Supabase dashboard IDE.
