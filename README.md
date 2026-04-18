@@ -22,16 +22,16 @@ EduOrchestrator solves this by introducing a highly structured, stateful LangGra
 
 ## 🏗️ System Architecture
 
-The core of the system is a directed acyclic graph (DAG) representing the lifecycle of a user request.
+The core of the system is a **Stateful Cyclic Graph** (built via LangGraph). Unlike a standard linear pipeline or simple DAG, this architecture supports **backtracking and self-correction loops** where the graph can re-route itself to fix validation errors or clarify intents before reaching the final output.
 
 1. **Intake & Profiling:** The API receives the request, associates it with a JWT auth token, and pulls the active student's mastery and emotional profile.
 2. **Context Analysis:** The system injects contextual modifiers into the state (e.g., `Style = Socratic`, `Difficulty Level = 3`).
-3. **Reasoning Engine:** An LLM determines the user's true intent, flags required tools, and builds a dependency map.
-4. **Tool Selection:** A hybrid keyword-ranker + LLM overrides static rankings using the student profile heuristics (e.g., penalizing "Mock Tests" for an anxious student).
-5. **Schema Extraction:** The LLM extracts specific constraints.
-6. **Validation & bounded Auto-Repair:** Verifies types, bounds, and enums against the strict tool schema. Attempts autonomic repair if violated.
+3. **Reasoning Engine:** An LLM determines the user's true intent, flags required tools, and builds a initial thought process.
+4. **Tool Selection:** A hybrid keyword-ranker + LLM overrides static rankings using the student profile heuristics.
+5. **Schema Extraction:** The LLM extracts specific constraints based on the target tool schema.
+6. **Validation & Self-Correction:** Verifies types, bounds, and enums. If the output is invalid, the graph **loops back** to the error handler or extractor to repair the payload autonomously.
 7. **Execution:** The validated payload is routed to one of 18 dedicated Python tools.
-8. **Observation & Finalization:** The execution output is synthesized into a pedagogically sound response mapped to the user profile.
+8. **Observation & Finalization:** The execution output is synthesized and verified. If quality is low, the graph can loop back for a retry.
 
 ---
 
