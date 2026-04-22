@@ -1,7 +1,5 @@
 # EduOrchestrator: Autonomous Educational AI Agent System
 
-![EduOrchestrator Banner](https://via.placeholder.com/1200x300?text=EduOrchestrator+-+Context-Aware+Agent+Architecture)
-
 EduOrchestrator is a robust, schema-aware AI orchestration system designed to act as an autonomous educational companion. Built upon a Supervisor-Agent graph architecture, the system translates natural language queries into deterministic, validated tool executions while dynamically adapting to the user's emotional state, mastery level, and preferred teaching style.
 
 ---
